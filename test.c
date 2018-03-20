@@ -20,23 +20,4 @@
  * You can contact us at contact4exo@exo.mk
  */
 
-/*
- *  Prototype log_info function.
- */
-void log_info(const char *info);
-
-/*
- *  Prototype log_info_message function.
- */
-
-void log_info_message(const char *info, const char *message);
-
-/*
- *  Prototype log_error function.
- */
-void log_error(const char *message);
-
-/*
- *  Prototype log_error function.
- */
-void log_error_msg_err(const char *message, char *error);
+// empty test file.
