@@ -68,7 +68,7 @@ nfc_context *context;
 char* timestamp();
 PGconn *create_db_connection();
 int find_device_id(PGconn *conn, const char *uid);
-void write_log(PGconn *conn, int device_id);
+void write_log(PGconn *conn, int device_id, char *register_type);
 static void print_hex(const uint8_t *pbtData, const size_t szBytes);
 char* build_hex_uid(const uint8_t *pbtData, const size_t szBytes);
 int CardTransmit(nfc_device *pnd, uint8_t * capdu, size_t capdulen, uint8_t * rapdu, size_t * rapdulen);
@@ -99,8 +99,7 @@ char* timestamp()
  *******************************************/
 PGconn *create_db_connection()
 {
-    // Change user/pass for connection string
-    const char *conn_string = "dbname=registrator user=user password=password";
+    const char *conn_string = "host=host port=port dbname=registrator user=user password=password";
     PGconn *conn;
     PGresult *res;
     int rows;
@@ -158,16 +157,31 @@ int find_device_id(PGconn *conn, const char *uid)
  * Write log entry into the work_log table.
  *
  *******************************************/
-void write_log(PGconn *conn, int device_id)
+void write_log(PGconn *conn, int device_id, char *register_type)
 {
     PGresult *res;
-    const char *params[2];
+    const char *params[3];
     char device_id_str[sizeof(int)];
 
     snprintf(device_id_str, sizeof(int), "%d", device_id); 
     params[0] = device_id_str;
-    params[1] = timestamp(); 
-    res = PQexecParams(conn, "INSERT INTO work_log(device_id, timestamp) VALUES($1, $2)", 2, NULL, params, NULL, NULL, 0);
+    params[1] = timestamp();
+
+    if(strcmp(register_type, "01") == 0)
+    {
+        params[2] = "REGISTER_IN";
+    }
+    else if(strcmp(register_type, "02") == 0)
+    {
+        params[2] = "BREAK";
+    }
+    else if(strcmp(register_type, "03") == 0)
+    {
+        params[2] = "REGISTER_OUT";
+    }
+
+    res = PQexecParams(conn, "INSERT INTO work_log(device_id, timestamp, register_type) VALUES($1, $2, $3)", 3, NULL, params, NULL, NULL, 0);
+
     if (PQresultStatus(res) != PGRES_COMMAND_OK)
     {
         log_error(PQresultErrorMessage(res)); 
@@ -175,7 +189,6 @@ void write_log(PGconn *conn, int device_id)
     }
 
     PQclear(res);
-
 }
 
 
@@ -192,6 +205,29 @@ static void print_hex(const uint8_t *pbtData, const size_t szBytes)
         printf("%02x  ", pbtData[szPos]);
     }
     printf("\n");
+}
+
+/******************************************** 
+ *
+ * Extract bytes as hex string.
+ *
+ *******************************************/
+char* extract_bytes_as_hex(const uint8_t *pbtData, size_t szPosStart, const size_t szBytes)
+{
+    size_t  szPos;
+    size_t  startPos;
+    size_t  endPos;
+    char *buf = malloc(20 * sizeof(char));
+    char *bufp = buf;
+
+    startPos = szPosStart;
+    endPos = szPosStart + szBytes;
+    for (szPos = startPos; szPos < endPos; szPos++) {
+        bufp += sprintf(bufp, "%02X", pbtData[szPos]);
+    }
+    buf[strlen(buf)] = '\0';
+
+    return buf;
 }
 
 /******************************************** 
@@ -299,53 +335,6 @@ void close_nfc_device()
     nfc_exit(context);
 }
 
-/******************************************** 
- *
- * Read device UID from the device.
- *
- *******************************************/
-char* read_device_uid(int argc, const char *argv[])
-{
-    // transmit APDU
-    uint8_t tapdu[264];
-    size_t tapdulen;
-
-    // receive APDU
-    uint8_t rapdu[264];
-    size_t rapdulen;
-
-    // UID
-    char *uid;
-
-    printf("Polling for target...\n");
-    while (nfc_initiator_select_passive_target(pnd, nmMifare, NULL, 0, &nt) <= 0);
-    printf("Target detected!\n");
-    
-    // Select application
-    memcpy(tapdu, APDU_HEADER_CARD_AID, APDU_HEADER_CARD_AID_LEN);
-    tapdulen = APDU_HEADER_CARD_AID_LEN;
-    rapdulen = sizeof(rapdu);
-
-    if (CardTransmit(pnd, tapdu, tapdulen, rapdu, &rapdulen) < 0) 
-    {
-	return NULL;
-        // exit(EXIT_FAILURE);
-    }
-
-    if (rapdulen < 2 || rapdu[rapdulen-2] != 0x90 || rapdu[rapdulen-1] != 0x00)
-    {
-	return NULL;
-        // exit(EXIT_FAILURE);
-    }
-
-    printf("Application selected!\n");
-
-    // do not read latest 2 bytes 9000 "OK" status word
-    uid = build_hex_uid(rapdu, rapdulen - 2);
-
-    return  uid;
-}
-
 void send_status_ok_cmd()
 {
     // transmit APDU
@@ -396,16 +385,53 @@ int main(int argc, const char* argv[])
     // scan device
     while(1)
     {
-        uid = read_device_uid(argc, argv);
+        // Read device UID and register type from the device.
+
+        // transmit APDU
+        uint8_t tapdu[264];
+        size_t tapdulen;
+
+        // receive APDU
+        uint8_t rapdu[264];
+        size_t rapdulen;
+
+        // UID
+        char *uid;
+
+        // Register type
+        char *register_type;
+
+        while (nfc_initiator_select_passive_target(pnd, nmMifare, NULL, 0, &nt) <= 0);
+    
+        // Select application
+        memcpy(tapdu, APDU_HEADER_CARD_AID, APDU_HEADER_CARD_AID_LEN);
+        tapdulen = APDU_HEADER_CARD_AID_LEN;
+        rapdulen = sizeof(rapdu);
+
+        if (CardTransmit(pnd, tapdu, tapdulen, rapdu, &rapdulen) < 0) 
+        {
+	    uid = NULL;
+            // exit(EXIT_FAILURE);
+        }
+
+        if (rapdulen < 2 || rapdu[rapdulen-2] != 0x90 || rapdu[rapdulen-1] != 0x00)
+        {
+	    uid = NULL;
+            // exit(EXIT_FAILURE);
+        }
+
+        // extract check status
+        register_type = extract_bytes_as_hex(rapdu, rapdulen - 3, 1);
+
+        // do not read latest 2 bytes 9000 "OK" status word
+        uid = build_hex_uid(rapdu, rapdulen - 3);
         if(uid != NULL)
         {
-            // printf("uid id: %s\n", uid);
             device_id = find_device_id(conn, uid);
             if(device_id > 0) {
                 send_status_ok_cmd();
             }
-            // printf("device id: %d\n", device_id);
-            write_log(conn, device_id);
+            write_log(conn, device_id, register_type);
         }
     }
     
