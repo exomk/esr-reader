@@ -13,7 +13,7 @@ EXO Smart Registrator C based card reader.
   cd libnfc-1.7.1
   make install
 ```
-## In order to enable logging functionality in the system log add the following configuration line in the /etc/rsyslog.d/50-default.conf configuration file for rsyslog.
+In order to enable logging functionality in the system log add the following configuration line in the /etc/rsyslog.d/50-default.conf configuration file for rsyslog.
 
 :programname,contains,"registrator" /var/log/registrator.log
 
