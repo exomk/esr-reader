@@ -20,9 +20,7 @@ In order to enable logging functionality in the system log add the following con
 ### Installing
 
 ```
-  aclocal
-  autoconf
-  automake --add-missing
+  ./autogen.sh
   ./configure
   make
   make install 
